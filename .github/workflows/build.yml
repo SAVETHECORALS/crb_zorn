@@ -69,11 +69,11 @@ jobs:
           echo "=== Free disk after cleanup ==="
           df -h /
 
-      - name: Allocate 6GB Swap Space
+      - name: Allocate 4GB Swap Space
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
-          sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144
+          sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
@@ -137,7 +137,7 @@ jobs:
             --depth=1 \
             --partial-clone \
             --clone-filter=blob:none \
-            -g default,-darwin,-notdefault
+            -g default,-darwin,-mips,-notdefault,-cts,-vts,-tests
           
           echo "=== [2/4] Injecting Xiaomi Zorn local manifest ==="
           mkdir -p .repo/local_manifests

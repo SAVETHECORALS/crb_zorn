@@ -129,6 +129,8 @@ jobs:
         run: |
           mkdir -p ~/android/lineage
           cd ~/android/lineage
+          
+          echo "=== [1/4] Initializing LineageOS 24.0 manifest (blobless, shallow) ==="
           repo init -u https://github.com/LineageOS/android.git \
             -b lineage-24.0 \
             --git-lfs \
@@ -137,14 +139,31 @@ jobs:
             --clone-filter=blob:none \
             -g default,-darwin,-mips,-notdefault,-cts,-tests,-pdk,-tools
           
-          # Inject custom local manifests
+          echo "=== [2/4] Injecting Xiaomi Zorn local manifest ==="
           mkdir -p .repo/local_manifests
           cp $GITHUB_WORKSPACE/manifests/zorn_a17.xml .repo/local_manifests/
+          echo "Active local manifest entries:"
+          cat .repo/local_manifests/zorn_a17.xml
           
-          # Shallow sync with controlled concurrency
-          repo sync -c -j4 --no-clone-bundle --no-tags --force-sync
+          echo "=== [3/4] Starting source checkout with live heartbeat monitor ==="
+          # Background progress monitor reporting status every 20 seconds
+          (
+            while true; do
+              sleep 20
+              REPOS=$(find . -maxdepth 3 -name ".git" 2>/dev/null | wc -l)
+              TREE_SIZE=$(du -sh . 2>/dev/null | cut -f1)
+              FREE_DISK=$(df -h / | awk 'NR==2 {print $4}')
+              echo "[$(date +'%T')] Live Sync: $REPOS repositories checked out | Tree size: $TREE_SIZE | Free disk: $FREE_DISK"
+            done
+          ) &
+          MONITOR_PID=$!
           
-          # Evict .repo git store (+35GB free space)
+          repo sync -c -j4 --no-clone-bundle --no-tags --force-sync --retry-fetches=3
+          
+          kill $MONITOR_PID 2>/dev/null || true
+          
+          echo "=== [4/4] Sync complete! Freeing .repo git metadata to maximize build disk space ==="
+          du -sh .repo/ || true
           rm -rf .repo
           echo "=== Free space after source sync & .repo eviction ==="
           df -h /
@@ -167,13 +186,16 @@ jobs:
           export CCACHE_EXEC=/usr/bin/ccache
           export WITHOUT_CHECK_API=true
           
+          echo "=== [1/3] Sourcing build environment ==="
           source build/envsetup.sh
+          
+          echo "=== [2/3] Configuring lunch target ==="
           lunch lineage_zorn-ap4a-userdebug || lunch lineage_zorn-trunk_staging-userdebug || lunch lineage_zorn-userdebug
           
           mkdir -p $GITHUB_WORKSPACE/artifacts
           
           TARGET="${{ inputs.target }}"
-          echo "Building target: $TARGET"
+          echo "=== [3/3] Compiling target: $TARGET ==="
           
           if [ "$TARGET" = "sepolicy" ]; then
             m sepolicy
@@ -194,6 +216,9 @@ jobs:
             cp out/target/product/zorn/dtbo.img $GITHUB_WORKSPACE/artifacts/ || true
             cp out/target/product/zorn/super_empty.img $GITHUB_WORKSPACE/artifacts/ || true
           fi
+          
+          echo "=== Build finished! Generated artifacts: ==="
+          ls -lh $GITHUB_WORKSPACE/artifacts/
 
       - name: Display CCache Stats
         if: always()

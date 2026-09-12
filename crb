@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 #
-# crb - Cloud Remote Builder & Thin-Client CLI for Xiaomi zorn (LineageOS 24.0 / Android 17)
+# crb - Cloud Remote Builder & Flashing CLI for Xiaomi zorn (LineageOS 24.0 / Android 17)
 #
 
 set -e
 
-DEVICE_IP="192.168.0.101:5555"
 WORKFLOW_FILE="build.yml"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ARTIFACTS_DIR="$PROJECT_DIR/artifacts"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 function log_info() {
@@ -32,26 +33,25 @@ function log_err() {
 }
 
 function print_usage() {
-    echo -e "${GREEN}crb - Xiaomi zorn (Android 17) Cloud Remote Builder & Hot-Patcher${NC}"
+    echo -e "${GREEN}crb - Xiaomi zorn (Android 17) Cloud Remote Builder & Fastboot Flasher${NC}"
     echo ""
     echo "Usage: ./crb <command> [arguments]"
     echo ""
     echo "Cloud CI Commands (GitHub Actions):"
-    echo "  build <target> [module]   Trigger remote cloud build on GitHub Actions"
-    echo "                            Targets: sepolicy | bootimage | module | rom"
+    echo "  build [target]            Trigger remote cloud build on GitHub Actions (default: rom)"
+    echo "                            Targets: rom (full flashable zip) | bootimage | recoveryimage | sepolicy"
+    echo "                            Example: ./crb build rom"
     echo "                            Example: ./crb build bootimage"
-    echo "                            Example: ./crb build module libgui_shim"
     echo "  status                    List recent cloud build runs and their status"
-    echo "  logs [run-id]             View live/recent workflow logs"
-    echo "  download [run-id]         Download compiled artifacts from cloud to ./artifacts/"
+    echo "  logs [run-id]             Stream/view workflow build logs"
+    echo "  download [run-id]         Download compiled flashable artifacts from cloud to ./artifacts/"
     echo ""
-    echo "Device Hot-Patching & Debugging (Wi-Fi ADB Root: $DEVICE_IP):"
-    echo "  connect                   Connect to device over Wi-Fi ADB and check root"
-    echo "  push <local> <remote>     Push updated file/library directly to device & restart"
-    echo "                            Example: ./crb push libgui_shim.so /vendor/lib64/"
-    echo "  flash <boot|all>          Flash downloaded boot.img / images via fastboot"
-    echo "  logcat [filter]           Stream filtered live device logs over Wi-Fi ADB"
-    echo "  shell                     Open interactive root shell on device"
+    echo "Phone Flashing Commands (From Xiaomi OS -> LineageOS via Fastboot & Recovery):"
+    echo "  flash-boot                Flash boot.img, vendor_boot.img, and dtbo.img via Fastboot"
+    echo "  flash-recovery            Flash recovery.img via Fastboot"
+    echo "  flash-all                 Flash boot, vendor_boot, dtbo, and recovery, then reboot to recovery"
+    echo "  sideload                  Sideload the flashable LineageOS zip via Recovery ADB sideload"
+    echo "  instructions              Display complete step-by-step flashing guide from Xiaomi OS"
     echo ""
 }
 
@@ -66,22 +66,53 @@ function ensure_gh_auth() {
     fi
 }
 
-function ensure_adb_connect() {
-    log_info "Verifying Wi-Fi ADB connection to $DEVICE_IP..."
-    adb connect "$DEVICE_IP" &> /dev/null || true
-    local dev_status=$(adb devices | grep "$DEVICE_IP" | awk '{print $2}')
-    if [ "$dev_status" != "device" ]; then
-        log_warn "Device is not connected at $DEVICE_IP. Retrying..."
-        adb disconnect "$DEVICE_IP" &> /dev/null || true
-        adb connect "$DEVICE_IP"
+function ensure_fastboot_device() {
+    if ! command -v fastboot &> /dev/null; then
+        log_err "fastboot command not found. Please install android-tools-fastboot."
+        exit 1
     fi
-    local root_id=$(adb -s "$DEVICE_IP" shell id -u 2>/dev/null || echo "failed")
-    if [ "$root_id" = "0" ]; then
-        log_success "Connected to $DEVICE_IP as ROOT (uid=0)."
-    else
-        log_info "Elevating to ADB root..."
-        adb -s "$DEVICE_IP" root || true
+    log_info "Detecting fastboot device..."
+    local fb_dev=$(fastboot devices | awk '{print $1}')
+    if [ -z "$fb_dev" ]; then
+        log_err "No device found in Fastboot mode! Put phone in Fastboot (Hold Volume Down + Power) and connect USB."
+        exit 1
     fi
+    log_success "Found Fastboot device: $fb_dev"
+}
+
+function print_instructions() {
+    echo -e "${CYAN}========================================================================${NC}"
+    echo -e "${GREEN}  Step-by-Step Flashing Guide: Xiaomi OS (HyperOS) -> LineageOS 24.0   ${NC}"
+    echo -e "${CYAN}========================================================================${NC}"
+    echo ""
+    echo "1. PREREQUISITES:"
+    echo "   - Bootloader MUST be officially unlocked on your Xiaomi zorn."
+    echo "   - Backup all important user data (format data will wipe the phone)."
+    echo ""
+    echo "2. BUILD THE FLASHABLE ROM:"
+    echo "   $ ./crb build rom"
+    echo "   (Track progress with './crb logs', check runs with './crb status')"
+    echo ""
+    echo "3. DOWNLOAD ARTIFACTS:"
+    echo "   $ ./crb download"
+    echo "   This downloads: boot.img, vendor_boot.img, dtbo.img, recovery.img, and lineage-*.zip"
+    echo ""
+    echo "4. FLASH VIA FASTBOOT:"
+    echo "   - Reboot phone into Fastboot mode: Hold Volume Down + Power."
+    echo "   - Connect USB-C cable to your PC."
+    echo "   $ ./crb flash-all"
+    echo "   (This flashes boot, vendor_boot, dtbo, and recovery, then reboots into Lineage Recovery)"
+    echo ""
+    echo "5. FACTORY RESET & SIDELOAD IN RECOVERY:"
+    echo "   - In Lineage Recovery on phone screen:"
+    echo "       Select 'Factory Reset' -> 'Format data/factory reset' -> Confirm"
+    echo "   - Return to main menu, select 'Apply update' -> 'Apply from ADB'"
+    echo "   - Run sideload command on PC:"
+    echo "       $ ./crb sideload"
+    echo "   - Once sideload reaches 100% (or step 2/2 finishes with total xfer 1.00x):"
+    echo "       Select 'Reboot system now'"
+    echo ""
+    echo -e "${CYAN}========================================================================${NC}"
 }
 
 COMMAND="$1"
@@ -89,22 +120,18 @@ shift || true
 
 case "$COMMAND" in
     build)
-        TARGET="${1:-bootimage}"
-        MODULE="${2:-libgui_shim}"
+        TARGET="${1:-rom}"
         ensure_gh_auth
         
-        log_info "Triggering GitHub Actions build for target: '$TARGET'..."
-        if [ "$TARGET" = "module" ]; then
-            gh workflow run "$WORKFLOW_FILE" -f target="$TARGET" -f module_name="$MODULE"
-        else
-            gh workflow run "$WORKFLOW_FILE" -f target="$TARGET"
-        fi
+        log_info "Triggering GitHub Actions cloud build for target: '$TARGET'..."
+        gh workflow run "$WORKFLOW_FILE" -f target="$TARGET"
         
-        log_success "Build triggered! Checking status..."
+        log_success "Cloud build triggered!"
         sleep 3
         gh run list --workflow="$WORKFLOW_FILE" --limit 3
         echo ""
-        log_info "To stream logs in real-time, run: ./crb logs"
+        log_info "To stream build logs in real-time, run: ./crb logs"
+        log_info "To check build status, run: ./crb status"
         ;;
 
     status)
@@ -126,68 +153,111 @@ case "$COMMAND" in
     download)
         ensure_gh_auth
         RUN_ID="$1"
-        mkdir -p "$PROJECT_DIR/artifacts"
+        mkdir -p "$ARTIFACTS_DIR"
         if [ -z "$RUN_ID" ]; then
             RUN_ID=$(gh run list --workflow="$WORKFLOW_FILE" --limit 1 --json databaseId -q '.[0].databaseId')
         fi
-        log_info "Downloading artifacts for Run ID: $RUN_ID into ./artifacts/..."
-        gh run download "$RUN_ID" --dir "$PROJECT_DIR/artifacts"
-        log_success "Artifacts saved:"
-        ls -la "$PROJECT_DIR/artifacts"
+        log_info "Downloading compiled flashable artifacts for Run ID: $RUN_ID..."
+        gh run download "$RUN_ID" --dir "$ARTIFACTS_DIR"
+        log_success "Downloaded flashable artifacts into ./artifacts/:"
+        find "$ARTIFACTS_DIR" -type f -exec ls -lh {} +
         ;;
 
-    connect)
-        ensure_adb_connect
-        ;;
+    flash-boot)
+        ensure_fastboot_device
+        BOOT_IMG=$(find "$ARTIFACTS_DIR" -name "boot.img" | head -n 1)
+        VENDOR_BOOT_IMG=$(find "$ARTIFACTS_DIR" -name "vendor_boot.img" | head -n 1)
+        DTBO_IMG=$(find "$ARTIFACTS_DIR" -name "dtbo.img" | head -n 1)
 
-    push)
-        LOCAL_FILE="$1"
-        REMOTE_PATH="$2"
-        if [ -z "$LOCAL_FILE" ] || [ -z "$REMOTE_PATH" ]; then
-            log_err "Usage: ./crb push <local_file> <remote_path>"
+        if [ -z "$BOOT_IMG" ] || [ ! -f "$BOOT_IMG" ]; then
+            log_err "boot.img not found in ./artifacts/. Run './crb download' first."
             exit 1
         fi
-        ensure_adb_connect
-        log_info "Remounting /vendor /system with rw permissions..."
-        adb -s "$DEVICE_IP" shell "su -c 'mount -o remount,rw /' || su -c 'mount -o remount,rw /vendor' || true"
-        log_info "Pushing $LOCAL_FILE -> $REMOTE_PATH on device..."
-        adb -s "$DEVICE_IP" push "$LOCAL_FILE" "$REMOTE_PATH"
-        adb -s "$DEVICE_IP" shell "su -c 'chmod 644 $REMOTE_PATH && chown root:root $REMOTE_PATH'"
-        log_success "Successfully hot-pushed $LOCAL_FILE to $REMOTE_PATH!"
-        log_info "If replacing a HAL or service, restart it with: ./crb shell 'pkill -f <name>'"
-        ;;
 
-    flash)
-        FLASH_TARGET="${1:-boot}"
-        log_info "Checking fastboot device..."
-        if [ "$FLASH_TARGET" = "boot" ]; then
-            BOOT_IMG="$PROJECT_DIR/artifacts/boot.img"
-            DTBO_IMG="$PROJECT_DIR/artifacts/dtbo.img"
-            VENDOR_BOOT_IMG="$PROJECT_DIR/artifacts/vendor_boot.img"
-            
-            if [ ! -f "$BOOT_IMG" ]; then
-                log_err "boot.img not found in ./artifacts/. Run './crb download' first."
-                exit 1
-            fi
-            log_info "Flashing boot images via fastboot..."
-            fastboot flash boot "$BOOT_IMG"
-            [ -f "$VENDOR_BOOT_IMG" ] && fastboot flash vendor_boot "$VENDOR_BOOT_IMG"
-            [ -f "$DTBO_IMG" ] && fastboot flash dtbo "$DTBO_IMG"
-            log_success "Boot images flashed successfully! Rebooting..."
-            fastboot reboot
+        log_info "Flashing boot.img -> boot partition..."
+        fastboot flash boot "$BOOT_IMG"
+
+        if [ -n "$VENDOR_BOOT_IMG" ] && [ -f "$VENDOR_BOOT_IMG" ]; then
+            log_info "Flashing vendor_boot.img -> vendor_boot partition..."
+            fastboot flash vendor_boot "$VENDOR_BOOT_IMG"
         fi
+
+        if [ -n "$DTBO_IMG" ] && [ -f "$DTBO_IMG" ]; then
+            log_info "Flashing dtbo.img -> dtbo partition..."
+            fastboot flash dtbo "$DTBO_IMG"
+        fi
+
+        log_success "Boot images flashed successfully!"
         ;;
 
-    logcat)
-        FILTER="${1:-zorn|hal|xiaomi|denied|fatal}"
-        ensure_adb_connect
-        log_info "Streaming logcat matching filter: '$FILTER'..."
-        adb -s "$DEVICE_IP" logcat -v color | grep -E --line-buffered "$FILTER"
+    flash-recovery)
+        ensure_fastboot_device
+        RECOVERY_IMG=$(find "$ARTIFACTS_DIR" -name "recovery.img" | head -n 1)
+
+        if [ -z "$RECOVERY_IMG" ] || [ ! -f "$RECOVERY_IMG" ]; then
+            log_err "recovery.img not found in ./artifacts/. Run './crb download' first."
+            exit 1
+        fi
+
+        log_info "Flashing recovery.img -> recovery partition..."
+        fastboot flash recovery "$RECOVERY_IMG"
+        log_success "Recovery flashed successfully!"
         ;;
 
-    shell)
-        ensure_adb_connect
-        adb -s "$DEVICE_IP" shell
+    flash-all)
+        ensure_fastboot_device
+        BOOT_IMG=$(find "$ARTIFACTS_DIR" -name "boot.img" | head -n 1)
+        VENDOR_BOOT_IMG=$(find "$ARTIFACTS_DIR" -name "vendor_boot.img" | head -n 1)
+        DTBO_IMG=$(find "$ARTIFACTS_DIR" -name "dtbo.img" | head -n 1)
+        RECOVERY_IMG=$(find "$ARTIFACTS_DIR" -name "recovery.img" | head -n 1)
+
+        if [ -z "$BOOT_IMG" ] || [ -z "$RECOVERY_IMG" ]; then
+            log_err "Required images (boot.img or recovery.img) missing in ./artifacts/. Run './crb download' first."
+            exit 1
+        fi
+
+        log_info "Flashing boot.img..."
+        fastboot flash boot "$BOOT_IMG"
+
+        if [ -n "$VENDOR_BOOT_IMG" ] && [ -f "$VENDOR_BOOT_IMG" ]; then
+            log_info "Flashing vendor_boot.img..."
+            fastboot flash vendor_boot "$VENDOR_BOOT_IMG"
+        fi
+
+        if [ -n "$DTBO_IMG" ] && [ -f "$DTBO_IMG" ]; then
+            log_info "Flashing dtbo.img..."
+            fastboot flash dtbo "$DTBO_IMG"
+        fi
+
+        log_info "Flashing recovery.img..."
+        fastboot flash recovery "$RECOVERY_IMG"
+
+        log_success "All boot and recovery partitions flashed successfully!"
+        log_info "Rebooting device into Lineage Recovery in 3 seconds..."
+        sleep 3
+        fastboot reboot recovery
+        log_success "Phone is booting into Recovery. Perform 'Factory Reset', select 'Apply from ADB', then run './crb sideload'."
+        ;;
+
+    sideload)
+        if ! command -v adb &> /dev/null; then
+            log_err "adb command not found. Please install android-tools-adb."
+            exit 1
+        fi
+        ZIP_FILE=$(find "$ARTIFACTS_DIR" -name "lineage-*.zip" | head -n 1)
+        if [ -z "$ZIP_FILE" ] || [ ! -f "$ZIP_FILE" ]; then
+            log_err "lineage-*.zip not found in ./artifacts/. Run './crb download' first."
+            exit 1
+        fi
+        log_info "Waiting for device in ADB Sideload mode..."
+        adb wait-for-sideload
+        log_info "Sideloading $ZIP_FILE..."
+        adb sideload "$ZIP_FILE"
+        log_success "Sideload completed! You can now reboot system from Recovery."
+        ;;
+
+    instructions)
+        print_instructions
         ;;
 
     *)

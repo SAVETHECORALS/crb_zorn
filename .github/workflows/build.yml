@@ -6,13 +6,13 @@ on:
       target:
         description: 'Build Target'
         required: true
-        default: 'bootimage'
+        default: 'rom'
         type: choice
         options:
-          - 'sepolicy'
-          - 'bootimage'
-          - 'module'
           - 'rom'
+          - 'bootimage'
+          - 'recoveryimage'
+          - 'sepolicy'
       module_name:
         description: 'Module name (only used if target is "module", e.g. libgui_shim)'
         required: false
@@ -156,15 +156,20 @@ jobs:
             cp out/target/product/zorn/boot.img $GITHUB_WORKSPACE/artifacts/ || true
             cp out/target/product/zorn/vendor_boot.img $GITHUB_WORKSPACE/artifacts/ || true
             cp out/target/product/zorn/dtbo.img $GITHUB_WORKSPACE/artifacts/ || true
-          elif [ "$TARGET" = "module" ]; then
-            MODULE="${{ inputs.module_name }}"
-            echo "Building individual module: $MODULE"
-            m $MODULE
-            find out/target/product/zorn/ -name "*$MODULE*" -type f -exec cp {} $GITHUB_WORKSPACE/artifacts/ \;
+          elif [ "$TARGET" = "recoveryimage" ]; then
+            m recoveryimage
+            cp out/target/product/zorn/recovery.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/boot.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/vendor_boot.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/dtbo.img $GITHUB_WORKSPACE/artifacts/ || true
           elif [ "$TARGET" = "rom" ]; then
             m bacon
             cp out/target/product/zorn/lineage-*.zip $GITHUB_WORKSPACE/artifacts/ || true
             cp out/target/product/zorn/recovery.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/boot.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/vendor_boot.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/dtbo.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/super_empty.img $GITHUB_WORKSPACE/artifacts/ || true
           fi
 
       - name: Display CCache Stats
@@ -181,11 +186,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish to GitHub Release
-        if: ${{ inputs.upload_release && success() && (inputs.target == 'bootimage' || inputs.target == 'rom') }}
+        if: ${{ inputs.upload_release && success() && (inputs.target == 'rom' || inputs.target == 'recoveryimage' || inputs.target == 'bootimage') }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: zorn-a17-${{ github.run_id }}
-          name: LineageOS 24.0 Zorn Artifacts (Run ${{ github.run_id }})
+          name: LineageOS 24.0 Zorn Flashable Artifacts (Run ${{ github.run_id }})
           body: |
             Automated cloud build for Xiaomi zorn (LineageOS 24.0 / Android 17).
             Target: `${{ inputs.target }}`

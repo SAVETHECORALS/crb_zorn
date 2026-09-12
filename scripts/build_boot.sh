@@ -23,8 +23,12 @@ mkdir -p "$ARTIFACTS_DIR"
 
 # Ensure mkbootimg is available
 if ! command -v mkbootimg &>/dev/null; then
-    echo "mkbootimg not found in PATH, downloading standalone mkbootimg from Android Open Source..."
-    curl -sSL "https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/mkbootimg.py?format=TEXT" | base64 -d > "$TMP_DIR/mkbootimg"
+    echo "mkbootimg not found in PATH, cloning mkbootimg repo from Android Open Source..."
+    git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg.git "$TMP_DIR/mkbootimg_repo"
+    cat << EOF > "$TMP_DIR/mkbootimg"
+#!/usr/bin/env bash
+python3 "$TMP_DIR/mkbootimg_repo/mkbootimg.py" "\$@"
+EOF
     chmod +x "$TMP_DIR/mkbootimg"
     export PATH="$TMP_DIR:$PATH"
 fi

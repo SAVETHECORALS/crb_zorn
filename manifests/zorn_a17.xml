@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <!-- Remotes -->
+  <remote name="github" fetch="https://github.com" />
+  <remote name="lineage" fetch="https://github.com/LineageOS" />
+  <remote name="codeberg" fetch="https://codeberg.org" />
+  <remote name="Little-Zorn-ID" fetch="https://github.com/Little-Zorn-ID" revision="lineage-22.2" />
+  <remote name="Sakura-Devices" fetch="https://github.com/Sakura-Devices" revision="16" />
+  <remote name="zorn-dev" fetch="https://github.com/zorn-development-sources" />
+  <remote name="ArmSM" fetch="https://codeberg.org/ArmSM" />
+
+  <!-- Device Tree -->
+  <project path="device/xiaomi/zorn" name="Sakura-Devices/device_xiaomi_zorn" remote="github" revision="16" />
+
+  <!-- Prebuilt Kernel, DTB, DTBO, and Vendor Modules -->
+  <project path="device/xiaomi/zorn-kernel" name="Little-Zorn-ID/device_xiaomi_zorn-kernel" remote="github" revision="lineage-23.0" />
+
+  <!-- Xiaomi Hardware Interface HALs -->
+  <project path="hardware/xiaomi" name="Little-Zorn-ID/hardware_xiaomi" remote="github" revision="lineage-22.2" />
+
+  <!-- Proprietary Vendor Blobs -->
+  <project path="vendor/xiaomi/zorn" name="vendor_xiaomi_zorn" remote="ArmSM" revision="16" clone-depth="1" />
+  <project path="vendor/xiaomi/camera" name="vendor_xiaomi_camera" remote="ArmSM" revision="main" clone-depth="1" />
+
+  <!-- Hardware Qualcomm SM8650 (pineapple) CAF HALs -->
+  <remove-project path="hardware/qcom-caf/common" />
+  <project path="hardware/qcom-caf/common" name="hardware_qcom-caf_common" groups="qcom" remote="Little-Zorn-ID" >
+    <linkfile src="os_pickup_aosp.mk" dest="hardware/qcom/Android.mk" />
+    <linkfile src="os_pickup_sepolicy_vndr.mk" dest="device/qcom/sepolicy_vndr/SEPolicy.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/msm8953/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/msm8953/Android.mk" />
+    <linkfile src="os_pickup.bp" dest="hardware/qcom-caf/msm8996/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/msm8996/Android.mk" />
+    <linkfile src="os_pickup.bp" dest="hardware/qcom-caf/msm8998/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/msm8998/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sdm660/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sdm660/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sdm845/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sdm845/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sm8150/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sm8150/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sm8250/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sm8250/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sm8350/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sm8350/Android.mk" />
+    <linkfile src="os_pickup_audio-ar.mk" dest="hardware/qcom-caf/sm8450/audio/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sm8450/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sm8450/Android.mk" />
+    <linkfile src="os_pickup_audio-ar.mk" dest="hardware/qcom-caf/sm8550/audio/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sm8550/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sm8550/Android.mk" />
+    <linkfile src="os_pickup_audio-ar.mk" dest="hardware/qcom-caf/sm8650/audio/Android.mk" />
+    <linkfile src="os_pickup_qssi.bp" dest="hardware/qcom-caf/sm8650/Android.bp" />
+    <linkfile src="os_pickup.mk" dest="hardware/qcom-caf/sm8650/Android.mk" />
+  </project>
+
+  <remove-project path="hardware/qcom-caf/sm8650/audio/agm" />
+  <project path="hardware/qcom-caf/sm8650/audio/agm" name="vendor_qcom_opensource_agm" groups="qcom,lanai-audio" revision="lineage-22.2" remote="Little-Zorn-ID" />
+
+  <remove-project path="hardware/qcom-caf/sm8650/audio/pal" />
+  <project path="hardware/qcom-caf/sm8650/audio/pal" name="vendor_qcom_opensource_arpal-lx" groups="qcom,lanai-audio" revision="lineage-22.2" remote="Little-Zorn-ID" />
+
+  <remove-project path="hardware/qcom-caf/sm8650/audio/primary-hal" />
+  <project path="hardware/qcom-caf/sm8650/audio/primary-hal" name="hardware_qcom_audio-ar" groups="qcom,lanai-audio" revision="lineage-22.2" remote="Little-Zorn-ID" />
+
+  <remove-project path="hardware/qcom-caf/sm8650/audio/graphservices" />
+  <project path="hardware/qcom-caf/sm8650/audio/graphservices" name="vendor_qcom_opensource_audioreach-graphservices" groups="qcom" revision="lineage-22.2" remote="Little-Zorn-ID" />
+
+  <remove-project path="hardware/qcom-caf/sm8650/display" />
+  <project path="hardware/qcom-caf/sm8650/display" name="hardware_qcom_display" groups="qcom" revision="lineage-22.2" remote="Little-Zorn-ID" />
+
+  <remove-project path="device/qcom/sepolicy_vndr/sm8650" />
+  <project path="device/qcom/sepolicy_vndr/sm8650" name="device_qcom_sepolicy_vndr" groups="qcom,lanai-vendor" revision="lineage-22.2" remote="Little-Zorn-ID" />
+
+  <!-- Dolby Audio Stack -->
+  <project path="hardware/dolby" name="zorn-development-sources/hardware_dolby" remote="github" revision="main" />
+</manifest>

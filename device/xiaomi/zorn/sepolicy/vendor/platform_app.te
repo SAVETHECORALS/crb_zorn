@@ -1,0 +1,21 @@
+typeattribute platform_app system_executes_vendor_violators;
+
+allow platform_app adsprpcd_file:dir { getattr search };
+allow platform_app hal_aidlbgservice_service:service_manager find;
+allow platform_app system_linker_exec:file execute_no_trans;
+
+get_prop(platform_app, vendor_audio_prop)
+get_prop(platform_app, vendor_camera_p3enable_prop)
+get_prop(platform_app, vendor_displayfeature_prop)
+get_prop(platform_app, vendor_panel_info_prop)
+get_prop(platform_app, vendor_camera_sensor_prop)
+get_prop(platform_app, vendor_fp_prop)
+get_prop(platform_app, vendor_display_prop)
+
+allow platform_app vendor_displayfeature_prop:file read;
+allow platform_app vendor_file:file { read open getattr map execute watch };
+allow platform_app hal_touchfeature_xiaomi_service:service_manager find;
+binder_call(platform_app, hal_touchfeature_xiaomi_default)
+
+hal_client_domain(platform_app, hal_dms)
+hal_client_domain(platform_app, vendor_hal_soter);

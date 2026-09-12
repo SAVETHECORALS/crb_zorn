@@ -1,0 +1,2 @@
+allow vendor_hal_imsrtp self:capability { net_bind_service };
+allow vendor_hal_imsrtp vendor_sysfs_data:file r_file_perms;

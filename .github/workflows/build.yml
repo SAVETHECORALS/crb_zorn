@@ -1,0 +1,195 @@
+name: Build LineageOS 24.0 for Xiaomi zorn
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Build Target'
+        required: true
+        default: 'bootimage'
+        type: choice
+        options:
+          - 'sepolicy'
+          - 'bootimage'
+          - 'module'
+          - 'rom'
+      module_name:
+        description: 'Module name (only used if target is "module", e.g. libgui_shim)'
+        required: false
+        default: 'libgui_shim'
+        type: string
+      clean_cache:
+        description: 'Wipe CCache before building'
+        required: false
+        default: false
+        type: boolean
+      upload_release:
+        description: 'Upload build artifacts to GitHub Releases'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    name: Build ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    
+    steps:
+      - name: Checkout Workspace Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Maximize Runner Disk Space
+        run: |
+          echo "=== Free disk before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /var/lib/docker
+          sudo rm -rf /usr/local/share/boost
+          sudo apt-get clean
+          echo "=== Free disk after cleanup ==="
+          df -h /
+
+      - name: Allocate 10GB Swap Space
+        run: |
+          sudo fallocate -l 10G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Install Build Dependencies & Setup Git
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev \
+            liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev \
+            libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools \
+            xsltproc zip zlib1g-dev python3 python-is-python3 jq
+          git config --global user.name "SAVETHECORALS"
+          git config --global user.email "ci@savethecorals.dev"
+
+      - name: Install Google Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Setup CCache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/ccache
+          key: ccache-zorn-${{ inputs.target }}-${{ github.sha }}
+          restore-keys: |
+            ccache-zorn-${{ inputs.target }}-
+            ccache-zorn-
+
+      - name: Configure CCache Environment
+        run: |
+          mkdir -p /tmp/ccache
+          export CCACHE_DIR=/tmp/ccache
+          export USE_CCACHE=1
+          export CCACHE_EXEC=/usr/bin/ccache
+          ccache -M 15G
+          if [ "${{ inputs.clean_cache }}" = "true" ]; then
+            ccache -C
+          fi
+          ccache -s
+
+      - name: Initialize LineageOS 24.0 Shallow Tree
+        run: |
+          mkdir -p ~/android/lineage
+          cd ~/android/lineage
+          repo init -u https://github.com/LineageOS/android.git -b lineage-24.0 --git-lfs --depth=1
+          
+          # Inject custom local manifests
+          mkdir -p .repo/local_manifests
+          cp $GITHUB_WORKSPACE/manifests/zorn_a17.xml .repo/local_manifests/
+          
+          # Shallow sync to minimize bandwidth and runner disk
+          repo sync -c -j$(nproc) --depth=1 --no-clone-bundle --no-tags --force-sync
+          
+          # Evict .repo git store (+30GB free space)
+          rm -rf .repo
+          echo "=== Free space after source sync & .repo eviction ==="
+          df -h /
+
+      - name: Overlay Local Device Tree Modifications
+        run: |
+          cd ~/android/lineage
+          if [ -d "$GITHUB_WORKSPACE/device/xiaomi/zorn" ]; then
+            echo "Applying local device tree modifications..."
+            rsync -av --exclude='.git' $GITHUB_WORKSPACE/device/xiaomi/zorn/ device/xiaomi/zorn/
+          fi
+
+      - name: Build Target (${{ inputs.target }})
+        run: |
+          cd ~/android/lineage
+          export CCACHE_DIR=/tmp/ccache
+          export USE_CCACHE=1
+          export CCACHE_EXEC=/usr/bin/ccache
+          export WITHOUT_CHECK_API=true
+          
+          source build/envsetup.sh
+          lunch lineage_zorn-ap4a-userdebug || lunch lineage_zorn-trunk_staging-userdebug || lunch lineage_zorn-userdebug
+          
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          
+          TARGET="${{ inputs.target }}"
+          echo "Building target: $TARGET"
+          
+          if [ "$TARGET" = "sepolicy" ]; then
+            m sepolicy
+            echo "SELinux policy successfully compiled!"
+            touch $GITHUB_WORKSPACE/artifacts/sepolicy_build_success.txt
+          elif [ "$TARGET" = "bootimage" ]; then
+            m bootimage vendor_bootimage dtboimage
+            cp out/target/product/zorn/boot.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/vendor_boot.img $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/dtbo.img $GITHUB_WORKSPACE/artifacts/ || true
+          elif [ "$TARGET" = "module" ]; then
+            MODULE="${{ inputs.module_name }}"
+            echo "Building individual module: $MODULE"
+            m $MODULE
+            find out/target/product/zorn/ -name "*$MODULE*" -type f -exec cp {} $GITHUB_WORKSPACE/artifacts/ \;
+          elif [ "$TARGET" = "rom" ]; then
+            m bacon
+            cp out/target/product/zorn/lineage-*.zip $GITHUB_WORKSPACE/artifacts/ || true
+            cp out/target/product/zorn/recovery.img $GITHUB_WORKSPACE/artifacts/ || true
+          fi
+
+      - name: Display CCache Stats
+        run: |
+          export CCACHE_DIR=/tmp/ccache
+          ccache -s
+
+      - name: Upload Artifacts to Workflow Run
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zorn-${{ inputs.target }}-${{ github.run_id }}
+          path: artifacts/*
+          if-no-files-found: warn
+
+      - name: Publish to GitHub Release
+        if: ${{ inputs.upload_release && success() && (inputs.target == 'bootimage' || inputs.target == 'rom') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: zorn-a17-${{ github.run_id }}
+          name: LineageOS 24.0 Zorn Artifacts (Run ${{ github.run_id }})
+          body: |
+            Automated cloud build for Xiaomi zorn (LineageOS 24.0 / Android 17).
+            Target: `${{ inputs.target }}`
+            Git Commit: `${{ github.sha }}`
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

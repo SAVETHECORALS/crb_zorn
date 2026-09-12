@@ -1,0 +1,21 @@
+# Build and artifact outputs
+artifacts/
+out/
+*.img
+*.zip
+*.tar
+*.gz
+
+# Repo and Git internals
+.repo/
+*.log
+
+# Project plans and internal docs
+plans/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+

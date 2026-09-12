@@ -1,0 +1,2 @@
+allow vendor_qrtr self:qipcrtr_socket create_socket_perms_no_ioctl;
+allow vendor_qrtr same_process_hal_file:file { execute read open getattr };

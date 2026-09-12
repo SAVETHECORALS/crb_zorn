@@ -106,7 +106,7 @@ jobs:
           fi
           ccache -s
 
-      - name: Build Boot & Kernel Artifacts (Target: bootimage)
+      - name: "Build Boot and Kernel Artifacts"
         if: ${{ inputs.target == 'bootimage' }}
         run: |
           mkdir -p $GITHUB_WORKSPACE/artifacts

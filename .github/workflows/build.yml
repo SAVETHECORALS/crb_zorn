@@ -117,7 +117,7 @@ jobs:
           cp $GITHUB_WORKSPACE/manifests/zorn_a17.xml .repo/local_manifests/
           
           # Shallow sync to minimize bandwidth and runner disk
-          repo sync -c -j$(nproc) --depth=1 --no-clone-bundle --no-tags --force-sync
+          repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
           
           # Evict .repo git store (+30GB free space)
           rm -rf .repo

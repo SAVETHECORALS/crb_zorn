@@ -137,7 +137,7 @@ jobs:
             --depth=1 \
             --partial-clone \
             --clone-filter=blob:none \
-            -g default,-darwin,-mips,-notdefault,-cts,-tests,-pdk,-tools
+            -g default,-darwin,-notdefault
           
           echo "=== [2/4] Injecting Xiaomi Zorn local manifest ==="
           mkdir -p .repo/local_manifests
@@ -187,10 +187,15 @@ jobs:
           export WITHOUT_CHECK_API=true
           
           echo "=== [1/3] Sourcing build environment ==="
+          if [ ! -f build/envsetup.sh ]; then
+            echo "[ERROR] build/envsetup.sh does not exist in $(pwd)!"
+            ls -la
+            exit 1
+          fi
           source build/envsetup.sh
           
           echo "=== [2/3] Configuring lunch target ==="
-          lunch lineage_zorn-ap4a-userdebug || lunch lineage_zorn-trunk_staging-userdebug || lunch lineage_zorn-userdebug
+          breakfast zorn || lunch lineage_zorn-ap4a-userdebug || lunch lineage_zorn-trunk_staging-userdebug || lunch lineage_zorn-userdebug
           
           mkdir -p $GITHUB_WORKSPACE/artifacts
           

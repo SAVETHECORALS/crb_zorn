@@ -43,6 +43,7 @@ function print_usage() {
     echo "                            Example: ./crb build rom"
     echo "                            Example: ./crb build bootimage"
     echo "  status                    List recent cloud build runs and their status"
+    echo "  watch [run-id]            Watch real-time live step progress of a running build"
     echo "  logs [run-id]             Stream/view workflow build logs"
     echo "  download [run-id]         Download compiled flashable artifacts from cloud to ./artifacts/"
     echo ""
@@ -140,14 +141,27 @@ case "$COMMAND" in
         gh run list --workflow="$WORKFLOW_FILE" --limit 8
         ;;
 
+    watch)
+        ensure_gh_auth
+        RUN_ID="$1"
+        if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list --workflow="$WORKFLOW_FILE" --limit 1 --json databaseId -q '.[0].databaseId')
+        fi
+        log_info "Watching live progress for Run ID: $RUN_ID..."
+        gh run watch "$RUN_ID"
+        ;;
+
     logs)
         ensure_gh_auth
         RUN_ID="$1"
         if [ -z "$RUN_ID" ]; then
             RUN_ID=$(gh run list --workflow="$WORKFLOW_FILE" --limit 1 --json databaseId -q '.[0].databaseId')
         fi
-        log_info "Streaming logs for Run ID: $RUN_ID..."
-        gh run view "$RUN_ID" --log
+        log_info "Fetching logs for Run ID: $RUN_ID..."
+        gh run view "$RUN_ID" --log 2>/dev/null || {
+            log_warn "Run is currently in progress. Switching to live watch..."
+            gh run watch "$RUN_ID"
+        }
         ;;
 
     download)

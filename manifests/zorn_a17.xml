@@ -73,5 +73,5 @@
   <project path="device/qcom/sepolicy_vndr/sm8650" name="device_qcom_sepolicy_vndr" groups="qcom,lanai-vendor" revision="lineage-22.2" remote="Little-Zorn-ID" />
 
   <!-- Dolby Audio Stack -->
-  <project path="hardware/dolby" name="zorn-development-sources/hardware_dolby" remote="github" revision="main" />
+  <project path="hardware/dolby" name="zorn-development-sources/hardware_dolby" remote="github" revision="16.3" />
 </manifest>

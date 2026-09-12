@@ -21,6 +21,22 @@ trap cleanup EXIT
 echo "=== Packaging Fastboot Boot & Recovery Artifacts for Xiaomi zorn ==="
 mkdir -p "$ARTIFACTS_DIR"
 
+# Ensure mkbootimg is available
+if ! command -v mkbootimg &>/dev/null; then
+    echo "mkbootimg not found in PATH, downloading standalone mkbootimg from Android Open Source..."
+    curl -sSL "https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/mkbootimg.py?format=TEXT" | base64 -d > "$TMP_DIR/mkbootimg"
+    chmod +x "$TMP_DIR/mkbootimg"
+    export PATH="$TMP_DIR:$PATH"
+fi
+
+# Ensure avbtool is available
+if ! command -v avbtool &>/dev/null; then
+    echo "avbtool not found in PATH, downloading standalone avbtool..."
+    curl -sSL "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT" | base64 -d > "$TMP_DIR/avbtool"
+    chmod +x "$TMP_DIR/avbtool"
+    export PATH="$TMP_DIR:$PATH"
+fi
+
 # 1. Fetch prebuilt kernel repository
 echo "[1/6] Fetching prebuilt GKI 6.1 kernel, dtb, dtbo, and vendor ramdisk..."
 git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" "$KERNEL_DIR"

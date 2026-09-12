@@ -47,21 +47,33 @@ jobs:
         run: |
           echo "=== Free disk before cleanup ==="
           df -h /
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /var/lib/docker
-          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache \
+            /var/lib/docker \
+            /var/lib/containerd \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/local/share/vcpkg \
+            /usr/local/graalvm \
+            /usr/share/swift \
+            /opt/pipx \
+            /opt/az \
+            /opt/microsoft \
+            /usr/share/sbt \
+            /usr/local/julia*
           sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
           echo "=== Free disk after cleanup ==="
           df -h /
 
-      - name: Allocate 10GB Swap Space
+      - name: Allocate 6GB Swap Space
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
-          sudo fallocate -l 10G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
+          sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
@@ -85,11 +97,11 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Setup CCache
-        uses: actions/cache@v4
+      - name: Restore CCache
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/ccache
-          key: ccache-zorn-${{ inputs.target }}-${{ github.sha }}
+          key: ccache-zorn-${{ inputs.target }}-${{ github.run_id }}
           restore-keys: |
             ccache-zorn-${{ inputs.target }}-
             ccache-zorn-
@@ -100,7 +112,7 @@ jobs:
           export CCACHE_DIR=/tmp/ccache
           export USE_CCACHE=1
           export CCACHE_EXEC=/usr/bin/ccache
-          ccache -M 15G
+          ccache -M 10G
           if [ "${{ inputs.clean_cache }}" = "true" ]; then
             ccache -C
           fi
@@ -117,16 +129,22 @@ jobs:
         run: |
           mkdir -p ~/android/lineage
           cd ~/android/lineage
-          repo init -u https://github.com/LineageOS/android.git -b lineage-24.0 --git-lfs --depth=1 -g default,-darwin,-mips,-notdefault,-cts,-tests
+          repo init -u https://github.com/LineageOS/android.git \
+            -b lineage-24.0 \
+            --git-lfs \
+            --depth=1 \
+            --partial-clone \
+            --clone-filter=blob:none \
+            -g default,-darwin,-mips,-notdefault,-cts,-tests,-pdk,-tools
           
           # Inject custom local manifests
           mkdir -p .repo/local_manifests
           cp $GITHUB_WORKSPACE/manifests/zorn_a17.xml .repo/local_manifests/
           
-          # Shallow sync to minimize bandwidth and runner disk
-          repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
+          # Shallow sync with controlled concurrency
+          repo sync -c -j4 --no-clone-bundle --no-tags --force-sync
           
-          # Evict .repo git store (+30GB free space)
+          # Evict .repo git store (+35GB free space)
           rm -rf .repo
           echo "=== Free space after source sync & .repo eviction ==="
           df -h /
@@ -178,9 +196,27 @@ jobs:
           fi
 
       - name: Display CCache Stats
+        if: always()
         run: |
           export CCACHE_DIR=/tmp/ccache
-          ccache -s
+          ccache -s || true
+
+      - name: Check CCache Content
+        if: always()
+        id: ccache-check
+        run: |
+          if [ -d /tmp/ccache ] && [ "$(ls -A /tmp/ccache 2>/dev/null)" ]; then
+            echo "has_cache=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_cache=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Save CCache (Always saves, even on failure)
+        uses: actions/cache/save@v4
+        if: always() && steps.ccache-check.outputs.has_cache == 'true'
+        with:
+          path: /tmp/ccache
+          key: ccache-zorn-${{ inputs.target }}-${{ github.run_id }}
 
       - name: Upload Artifacts to Workflow Run
         uses: actions/upload-artifact@v4

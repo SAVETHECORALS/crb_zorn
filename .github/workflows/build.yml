@@ -106,11 +106,18 @@ jobs:
           fi
           ccache -s
 
+      - name: Build Boot & Kernel Artifacts (Target: bootimage)
+        if: ${{ inputs.target == 'bootimage' }}
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          ./scripts/build_boot.sh $GITHUB_WORKSPACE/artifacts
+
       - name: Initialize LineageOS 24.0 Shallow Tree
+        if: ${{ inputs.target != 'bootimage' }}
         run: |
           mkdir -p ~/android/lineage
           cd ~/android/lineage
-          repo init -u https://github.com/LineageOS/android.git -b lineage-24.0 --git-lfs --depth=1
+          repo init -u https://github.com/LineageOS/android.git -b lineage-24.0 --git-lfs --depth=1 -g default,-darwin,-mips,-notdefault,-cts,-tests
           
           # Inject custom local manifests
           mkdir -p .repo/local_manifests
@@ -125,6 +132,7 @@ jobs:
           df -h /
 
       - name: Overlay Local Device Tree Modifications
+        if: ${{ inputs.target != 'bootimage' }}
         run: |
           cd ~/android/lineage
           if [ -d "$GITHUB_WORKSPACE/device/xiaomi/zorn" ]; then
@@ -133,6 +141,7 @@ jobs:
           fi
 
       - name: Build Target (${{ inputs.target }})
+        if: ${{ inputs.target != 'bootimage' }}
         run: |
           cd ~/android/lineage
           export CCACHE_DIR=/tmp/ccache
@@ -152,11 +161,6 @@ jobs:
             m sepolicy
             echo "SELinux policy successfully compiled!"
             touch $GITHUB_WORKSPACE/artifacts/sepolicy_build_success.txt
-          elif [ "$TARGET" = "bootimage" ]; then
-            m bootimage vendor_bootimage dtboimage
-            cp out/target/product/zorn/boot.img $GITHUB_WORKSPACE/artifacts/ || true
-            cp out/target/product/zorn/vendor_boot.img $GITHUB_WORKSPACE/artifacts/ || true
-            cp out/target/product/zorn/dtbo.img $GITHUB_WORKSPACE/artifacts/ || true
           elif [ "$TARGET" = "recoveryimage" ]; then
             m recoveryimage
             cp out/target/product/zorn/recovery.img $GITHUB_WORKSPACE/artifacts/ || true

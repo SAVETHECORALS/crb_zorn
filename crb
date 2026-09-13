@@ -51,6 +51,7 @@ function print_usage() {
     echo "                            Targets: recoveryimage | bootimage | rom | sepolicy"
     echo "                            Example: ./crb circle-build recoveryimage"
     echo "  circle-status             List recent CircleCI pipeline runs"
+    echo "  circle-watch [run_id]     Watch real-time live step progress of a CircleCI run"
     echo "  circle-download <job_id>  Download compiled flashable artifacts from CircleCI job"
     echo ""
     echo "Phone Flashing Commands (From Xiaomi OS -> LineageOS via Fastboot & Recovery):"
@@ -99,9 +100,10 @@ function do_circle_build() {
 
     if command -v circleci &>/dev/null && circleci auth me &>/dev/null; then
         log_info "Triggering CircleCI pipeline via circleci CLI (target: '$target', branch: '$cur_branch')..."
-        circleci run trigger --project "$CIRCLE_PROJECT_SLUG" --branch "$cur_branch" --parameter target="$target"
+        circleci run trigger --branch "$cur_branch" --parameter target="$target"
         echo ""
         log_info "To check pipeline status: ./crb circle-status"
+        log_info "To watch live progress:  ./crb circle-watch"
     else
         local token=$(get_circle_token)
         if [ -n "$token" ]; then
@@ -137,7 +139,7 @@ function do_circle_build() {
 function do_circle_status() {
     if command -v circleci &>/dev/null && circleci auth me &>/dev/null; then
         log_info "Fetching recent CircleCI runs via circleci CLI..."
-        circleci run list --project "$CIRCLE_PROJECT_SLUG" || true
+        circleci run list || true
     else
         local token=$(get_circle_token)
         if ensure_circle_token; then
@@ -145,6 +147,19 @@ function do_circle_status() {
             curl -s "https://circleci.com/api/v2/project/$CIRCLE_PROJECT_SLUG/pipeline" \
                 -H "Circle-Token: $token" | jq -r '.items[0:8][] | "Pipeline #\(.number) | State: \(.state) | Branch: \(.vcs.branch // "N/A") | Created: \(.created_at) | ID: \(.id)"' || true
         fi
+    fi
+}
+
+function do_circle_watch() {
+    local run_id="$1"
+    if [ -z "$run_id" ]; then
+        run_id=$(circleci run list --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty')
+    fi
+    if [ -n "$run_id" ]; then
+        log_info "Watching CircleCI run $run_id in real-time..."
+        circleci run watch "$run_id"
+    else
+        log_warn "No active CircleCI run found to watch."
     fi
 }
 
@@ -312,6 +327,10 @@ case "$COMMAND" in
 
     circle-status|cci-status)
         do_circle_status
+        ;;
+
+    circle-watch|cci-watch)
+        do_circle_watch "$1"
         ;;
 
     circle-download|cci-download)

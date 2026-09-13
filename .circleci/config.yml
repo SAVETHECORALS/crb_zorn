@@ -1,31 +1,226 @@
-# Use the latest 2.1 version of CircleCI pipeline process engine.
-# See: https://circleci.com/docs/reference/configuration-reference/
+# CircleCI 2.1 Pipeline for Xiaomi zorn (LineageOS 24.0 / Android 17)
+# Optimized for Fast Recovery Image & Boot Artifact Compilation
 version: 2.1
 
-# Define a job to be invoked later in a workflow.
-# See: https://circleci.com/docs/guides/orchestrate/jobs-steps/#jobs-overview & https://circleci.com/docs/reference/configuration-reference/#jobs
+parameters:
+  target:
+    description: "Build Target (recoveryimage, bootimage, rom, sepolicy)"
+    type: enum
+    enum: ["recoveryimage", "bootimage", "rom", "sepolicy"]
+    default: "recoveryimage"
+  clean_cache:
+    description: "Wipe CCache before compilation"
+    type: boolean
+    default: false
+
 jobs:
-  say-hello:
-    # Specify the execution environment. You can specify an image from Docker Hub or use one of our convenience images from CircleCI's Developer Hub.
-    # See: https://circleci.com/docs/guides/execution-managed/executor-intro/ & https://circleci.com/docs/reference/configuration-reference/#executor-job
-    docker:
-      # Specify the version you desire here
-      # See: https://circleci.com/developer/images/image/cimg/base
-      - image: cimg/base:current
+  build-zorn:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
 
-    # Add steps to the job
-    # See: https://circleci.com/docs/guides/orchestrate/jobs-steps/#steps-overview & https://circleci.com/docs/reference/configuration-reference/#steps
+    environment:
+      CCACHE_DIR: /tmp/ccache
+      USE_CCACHE: "1"
+      CCACHE_EXEC: /usr/bin/ccache
+      WITHOUT_CHECK_API: "true"
+
     steps:
-      # Checkout the code as the first step.
       - checkout
-      - run:
-          name: "Say hello"
-          command: "echo Hello, World!"
 
-# Orchestrate jobs using workflows
-# See: https://circleci.com/docs/guides/orchestrate/workflows/ & https://circleci.com/docs/reference/configuration-reference/#workflows
+      - run:
+          name: "System Cleanup & Disk Space Optimization"
+          command: |
+            echo "=== Initial Disk Space ==="
+            df -h /
+            sudo apt-get clean
+            sudo rm -rf /var/lib/apt/lists/*
+            echo "=== Free Space After Clean ==="
+            df -h /
+
+      - run:
+          name: "Configure 8GB Swap Space"
+          command: |
+            sudo swapoff -a || true
+            sudo rm -f /swapfile
+            sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            free -h
+
+      - run:
+          name: "Install Build Tools & Dependencies"
+          command: |
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq \
+              bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+              git gnupg gperf imagemagick libelf-dev liblz4-tool libncurses-dev \
+              libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+              squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3 jq
+            git config --global user.name "SAVETHECORALS"
+            git config --global user.email "1pro00013@gmail.com"
+            mkdir -p ~/bin
+            curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+            chmod a+x ~/bin/repo
+            echo 'export PATH=$HOME/bin:$PATH' >> $BASH_ENV
+
+      - restore_cache:
+          name: "Restore CCache"
+          keys:
+            - ccache-zorn-<< pipeline.parameters.target >>-{{ .Branch }}
+            - ccache-zorn-<< pipeline.parameters.target >>-
+            - ccache-zorn-
+
+      - run:
+          name: "Configure CCache Settings"
+          command: |
+            mkdir -p /tmp/ccache
+            ccache -M 15G
+            if [ "<< pipeline.parameters.clean_cache >>" = "true" ]; then
+              echo "Wiping CCache as requested..."
+              ccache -C
+            fi
+            ccache -s
+
+      - run:
+          name: "Build Fastboot Boot & Kernel Artifacts (Target: bootimage)"
+          command: |
+            if [ "<< pipeline.parameters.target >>" = "bootimage" ]; then
+              echo "Building standalone bootimage via scripts/build_boot.sh..."
+              mkdir -p artifacts
+              ./scripts/build_boot.sh artifacts
+            else
+              echo "Skipping standalone boot builder; target is << pipeline.parameters.target >>"
+            fi
+
+      - run:
+          name: "Initialize LineageOS 24.0 Shallow Tree & Sync"
+          no_output_timeout: 45m
+          command: |
+            if [ "<< pipeline.parameters.target >>" = "bootimage" ]; then
+              echo "Target is bootimage, skipping AOSP source tree sync."
+              exit 0
+            fi
+
+            mkdir -p ~/android/lineage
+            cd ~/android/lineage
+
+            echo "=== [1/4] Initializing LineageOS 24.0 manifest (shallow/blobless) ==="
+            repo init -u https://github.com/LineageOS/android.git \
+              -b lineage-24.0 \
+              --git-lfs \
+              --depth=1 \
+              --partial-clone \
+              --clone-filter=blob:none \
+              -g default,-darwin,-mips,-notdefault,-cts,-vts,-tests
+
+            echo "=== [2/4] Injecting Xiaomi Zorn local manifest ==="
+            mkdir -p .repo/local_manifests
+            cp ~/project/manifests/zorn_a17.xml .repo/local_manifests/
+            echo "Active local manifest entries:"
+            cat .repo/local_manifests/zorn_a17.xml
+
+            echo "=== [3/4] Syncing source code with live heartbeat monitor ==="
+            (
+              while true; do
+                sleep 25
+                REPOS=$(find . -maxdepth 3 -name ".git" 2>/dev/null | wc -l)
+                TREE_SIZE=$(du -sh . 2>/dev/null | cut -f1)
+                FREE_DISK=$(df -h / | awk 'NR==2 {print $4}')
+                echo "[$(date +'%T')] Live Sync: $REPOS repos | Tree size: $TREE_SIZE | Free disk: $FREE_DISK"
+              done
+            ) &
+            MONITOR_PID=$!
+
+            repo sync -c -j4 --no-clone-bundle --no-tags --force-sync --retry-fetches=3
+            kill $MONITOR_PID 2>/dev/null || true
+
+            echo "=== [4/4] Pruning .repo metadata to reclaim disk space ==="
+            du -sh .repo/ || true
+            rm -rf .repo
+            echo "Free disk space after prune:"
+            df -h /
+
+      - run:
+          name: "Overlay Local Device Tree Modifications"
+          command: |
+            if [ "<< pipeline.parameters.target >>" = "bootimage" ]; then
+              exit 0
+            fi
+            cd ~/android/lineage
+            if [ -d "~/project/device/xiaomi/zorn" ]; then
+              echo "Applying local device tree modifications..."
+              rsync -av --exclude='.git' ~/project/device/xiaomi/zorn/ device/xiaomi/zorn/
+            fi
+
+      - run:
+          name: "Compile Target (<< pipeline.parameters.target >>)"
+          no_output_timeout: 60m
+          command: |
+            if [ "<< pipeline.parameters.target >>" = "bootimage" ]; then
+              exit 0
+            fi
+
+            cd ~/android/lineage
+            mkdir -p ~/project/artifacts
+
+            echo "=== Sourcing Android Build Environment ==="
+            if [ ! -f build/envsetup.sh ]; then
+              echo "[ERROR] build/envsetup.sh not found!"
+              exit 1
+            fi
+            source build/envsetup.sh
+
+            echo "=== Setting lunch configuration for zorn ==="
+            breakfast zorn || lunch lineage_zorn-ap4a-userdebug || lunch lineage_zorn-trunk_staging-userdebug || lunch lineage_zorn-userdebug
+
+            TARGET="<< pipeline.parameters.target >>"
+            echo "=== Compiling Target: $TARGET ==="
+
+            if [ "$TARGET" = "sepolicy" ]; then
+              m sepolicy
+              echo "SELinux policy successfully compiled!"
+              touch ~/project/artifacts/sepolicy_build_success.txt
+            elif [ "$TARGET" = "recoveryimage" ]; then
+              m recoveryimage
+              echo "Copying recovery and fastboot boot artifacts..."
+              cp out/target/product/zorn/recovery.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/boot.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/vendor_boot.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/dtbo.img ~/project/artifacts/ || true
+            elif [ "$TARGET" = "rom" ]; then
+              m bacon
+              cp out/target/product/zorn/lineage-*.zip ~/project/artifacts/ || true
+              cp out/target/product/zorn/recovery.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/boot.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/vendor_boot.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/dtbo.img ~/project/artifacts/ || true
+              cp out/target/product/zorn/super_empty.img ~/project/artifacts/ || true
+            fi
+
+            echo "=== Build Finished! Generated artifacts in ~/project/artifacts: ==="
+            ls -lh ~/project/artifacts/
+
+      - run:
+          name: "Display CCache Statistics"
+          when: always
+          command: |
+            ccache -s || true
+
+      - save_cache:
+          name: "Save CCache"
+          when: always
+          key: ccache-zorn-<< pipeline.parameters.target >>-{{ .Branch }}-{{ .BuildNum }}
+          paths:
+            - /tmp/ccache
+
+      - store_artifacts:
+          path: artifacts
+          destination: zorn-artifacts
+
 workflows:
-  say-hello-workflow: # This is the name of the workflow, feel free to change it to better match your workflow.
-    # Inside the workflow, you define the jobs you want to run.
+  build-pipeline:
     jobs:
-      - say-hello
+      - build-zorn

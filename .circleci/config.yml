@@ -17,7 +17,7 @@ jobs:
   build-zorn:
     machine:
       image: ubuntu-2404:current
-    resource_class: large
+    resource_class: 2xlarge+
     working_directory: ~/project
 
     environment:
@@ -134,7 +134,7 @@ jobs:
             ) &
             MONITOR_PID=$!
 
-            repo sync -c -j4 --no-clone-bundle --no-tags --force-sync --retry-fetches=3
+            repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync --retry-fetches=3
             kill $MONITOR_PID 2>/dev/null || true
 
             echo "=== [4/4] Pruning .repo metadata to reclaim disk space ==="
